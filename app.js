@@ -80,7 +80,7 @@
     app.innerHTML = `<div class="grid-head"><h1>${state.cycleId}</h1>
       <div class="sub">문항을 눌러 보고, 하단에서 라벨링하세요. ● = 입력된 항목 · 우상단 = 채택</div></div>
       <div class="grid">${cards}</div>
-      <p class="footnote">라벨은 이 기기에 자동 저장됩니다(현재 localStorage). 상단 '내보내기'로 JSON을 저장해 전달하세요.</p>`;
+      <p class="footnote">라벨은 이 기기에 자동 저장됩니다(localStorage). 다 매기면 상단 <b>전송</b> — 비공개 수집함에 이슈로 올라가고 파이프라인이 바로 읽습니다. '내보내기'는 JSON 파일 백업용입니다.</p>`;
     app.querySelectorAll('.gcard').forEach(a => a.onclick = (e) => {
       e.preventDefault(); state.idx = +a.dataset.i; renderDetail();
     });
@@ -218,6 +218,59 @@
     a.click(); URL.revokeObjectURL(a.href);
   }
 
+  // ---------- 전송 (비공개 수집함 이슈로) ----------
+  // 이 사이트는 공개 정적 페이지라 토큰을 둘 수 없다(넣으면 누구나 쓰기 가능해짐).
+  // 그래서 자격증명 없이 **보는 사람의 GitHub 세션**으로 비공개 저장소에 이슈를 여는 방식을 쓴다.
+  // 파이프라인은 `gh api repos/minjunecode/tongsa-labels/issues`로 그 이슈를 읽는다.
+  const SINK = 'minjunecode/tongsa-labels';
+  const URL_BUDGET = 7000;   // 브라우저·GitHub의 GET 한계 여유분
+
+  function compact(map) {
+    // 키를 줄이고 빈 값을 버려 URL 예산을 아낀다.
+    const out = {};
+    for (const [qid, L] of Object.entries(map)) {
+      if (!L) continue;
+      const o = {};
+      if (L.curriculum) o.c = L.curriculum;
+      if (L.difficulty) o.d = L.difficulty;
+      if (L.quality) o.q = L.quality;
+      if (L.adopt) o.a = L.adopt;
+      if (L.curriculumNote) o.cn = L.curriculumNote;
+      if (L.reviseNote) o.rn = L.reviseNote;
+      if (L.discardNote) o.dn = L.discardNote;
+      if (Object.keys(o).length) out[qid] = o;
+    }
+    return out;
+  }
+
+  async function sendLabels() {
+    const map = await LabelStore.exportCycle(state.cycleId);
+    const small = compact(map);
+    const n = Object.keys(small).length;
+    if (!n) { alert('전송할 라벨이 없습니다.'); return; }
+
+    const body = [
+      '```json',
+      JSON.stringify({ cycle: state.cycleId, sent_at: new Date().toISOString(), count: n, labels: small }),
+      '```'
+    ].join('\n');
+    const title = `labels: ${state.cycleId} (${n})`;
+    const url = `https://github.com/${SINK}/issues/new`
+      + `?title=${encodeURIComponent(title)}`
+      + `&labels=labels`
+      + `&body=${encodeURIComponent(body)}`;
+
+    if (url.length <= URL_BUDGET) {
+      window.open(url, '_blank', 'noopener');
+      return;
+    }
+    // 예산 초과 — 본문을 클립보드에 넣고 빈 이슈 폼을 연다(붙여넣기 1회).
+    try { await navigator.clipboard.writeText(body); } catch (e) { /* 무시 */ }
+    alert(`라벨 ${n}건이 URL 한계를 넘어 클립보드에 복사했습니다.\n열리는 이슈 본문에 붙여넣기(Ctrl+V) 후 등록하세요.`);
+    window.open(`https://github.com/${SINK}/issues/new?title=${encodeURIComponent(title)}&labels=labels`,
+      '_blank', 'noopener');
+  }
+
   // ---------- 테마 토글 ----------
   function toggleTheme() {
     const root = document.documentElement;
@@ -226,6 +279,7 @@
     root.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
   }
 
+  el('sendBtn').onclick = sendLabels;
   el('exportBtn').onclick = exportLabels;
   el('themeBtn').onclick = toggleTheme;
   init().catch(e => { app.innerHTML = `<p class="footnote">데이터 로드 실패: ${e.message}<br>정적 서버로 열어야 합니다(파일 직접 열기 불가).</p>`; });

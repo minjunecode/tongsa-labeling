@@ -22,9 +22,14 @@ ASSETS.mkdir(parents=True, exist_ok=True)
 ASSET_SRC = SRC / "@ 자료 모음"
 
 def ls(pattern_dir, glob):
-    r = subprocess.run(["bash", "-lc", f'ls "{pattern_dir}"/{glob} 2>/dev/null'],
-                       capture_output=True, text=True)
-    return [l for l in r.stdout.split("\n") if l.strip()]
+    """폴더 안에서 glob에 맞는 파일 경로.
+
+    ★ 원래는 `bash -lc ls`를 subprocess로 불렀는데 Windows에서 죽는다 —
+      `text=True`가 로케일(cp949)로 디코딩하려 들고 한글 파일명이 UTF-8이라
+      읽기 스레드가 예외로 끝나 stdout이 None이 된다. pathlib은 셸도 인코딩도
+      거치지 않는다.
+    """
+    return sorted(str(x) for x in pathlib.Path(pattern_dir).glob(glob))
 
 cards = sorted(ls(SRC, "27통사_*_초안.md"),
                key=lambda p: pathlib.Path(p).name.split("_")[3])
@@ -48,10 +53,9 @@ def asset_for(orig_name, token):
     """원본 png를 assets/q{token}_{n}.png(ASCII)로 복사, 상대경로 반환."""
     key = orig_name.strip()
     if key in _copied: return _copied[key]
-    found = subprocess.run(["bash", "-lc", f'ls "{ASSET_SRC}/{key}"'], capture_output=True, text=True)
-    if found.returncode != 0:
+    srcp = ASSET_SRC / key
+    if not srcp.exists():
         _copied[key] = None; return None
-    srcp = found.stdout.strip()
     n = sum(1 for v in _copied.values() if v and f"/q{token}_" in v) + 1
     dst_name = f"q{token}_{n}.png"
     shutil.copy(srcp, ASSETS / dst_name)
